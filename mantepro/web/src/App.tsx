@@ -1,14 +1,15 @@
-// MantePro v0.6
+// MantePro v0.8
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
-const VERSION = 'v0.6'
+const VERSION = 'v0.8'
 
-// ─── ADMIN ───────────────────────────────────────────────────────────────────
 function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void }) {
-  const [vista, setVista] = useState<'dashboard'|'usuarios'|'categorias'>('dashboard')
+  const [vista, setVista] = useState<'dashboard'|'usuarios'|'categorias'|'reportes'>('dashboard')
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [categorias, setCategorias] = useState<any[]>([])
+  const [reportes, setReportes] = useState<any[]>([])
+  const [loadingReportes, setLoadingReportes] = useState(false)
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [nuevoRol, setNuevoRol] = useState<'tecnico'|'reportador'|'admin'>('tecnico')
   const [nuevaClave, setNuevaClave] = useState('')
@@ -16,22 +17,50 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
   const [creando, setCreando] = useState(false)
   const [msgUsuario, setMsgUsuario] = useState('')
   const [editando, setEditando] = useState<any>(null)
-  // categorias
   const [catNombre, setCatNombre] = useState('')
   const [catColor, setCatColor] = useState('#E24B4A')
   const [editandoCat, setEditandoCat] = useState<any>(null)
   const [msgCat, setMsgCat] = useState('')
+  const [reporteDetalle, setReporteDetalle] = useState<any>(null)
+  const [tecnicos, setTecnicos] = useState<any[]>([])
+  const [tecnicoAsignado, setTecnicoAsignado] = useState('')
+  const [fechaEstimada, setFechaEstimada] = useState('')
+  const [msgReporte, setMsgReporte] = useState('')
 
   async function cargarUsuarios() {
     const { data } = await supabase.from('usuarios').select('*').order('created_at', { ascending: false })
     if (data) setUsuarios(data)
   }
-
   async function cargarCategorias() {
     const { data } = await supabase.from('categorias').select('*').order('created_at', { ascending: true })
     if (data) setCategorias(data)
   }
-
+  async function cargarReportes() {
+    setLoadingReportes(true)
+    const { data } = await supabase.from('ordenes_trabajo').select('*').order('created_at', { ascending: false })
+    if (data) setReportes(data)
+    setLoadingReportes(false)
+  }
+  async function cargarTecnicos() {
+    const { data } = await supabase.from('usuarios').select('*').eq('rol', 'tecnico').order('nombre')
+    if (data) setTecnicos(data)
+  }
+  async function aprobarReporte(id: string) {
+    setMsgReporte('')
+    const updates: any = { estado: 'en_curso', aprobado_por: email }
+    if (fechaEstimada) updates.fecha_estimada = fechaEstimada
+    if (tecnicoAsignado) updates.tecnico_id = tecnicoAsignado
+    const { error } = await supabase.from('ordenes_trabajo').update(updates).eq('id', id)
+    if (!error) {
+      setMsgReporte('✓ Reporte aprobado y convertido en OT')
+      setReporteDetalle(null); cargarReportes()
+    } else setMsgReporte('Error: ' + error.message)
+  }
+  async function rechazarReporte(id: string) {
+    if (!window.confirm('¿Rechazar este reporte?')) return
+    const { error } = await supabase.from('ordenes_trabajo').update({ estado: 'cerrada' }).eq('id', id)
+    if (!error) { setReporteDetalle(null); cargarReportes() }
+  }
   async function crearUsuario() {
     if (!nuevoNombre) return
     setCreando(true); setMsgUsuario('')
@@ -42,46 +71,34 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
     })
     if (!error) {
       setMsgUsuario(`✓ Usuario "${nuevoNombre}" creado`)
-      setNuevoNombre(''); setNuevaClave(''); setNuevoEmail('')
-      cargarUsuarios()
+      setNuevoNombre(''); setNuevaClave(''); setNuevoEmail(''); cargarUsuarios()
     } else setMsgUsuario('Error: ' + error.message)
     setCreando(false)
   }
-
   async function guardarEdicion() {
     if (!editando) return
     const updates: any = { nombre: editando.nombre, rol: editando.rol }
     if (editando.clave) updates.clave = editando.clave
     const { error } = await supabase.from('usuarios').update(updates).eq('id', editando.id)
-    if (!error) { setEditando(null); cargarUsuarios() }
-    else alert('Error: ' + error.message)
+    if (!error) { setEditando(null); cargarUsuarios() } else alert('Error: ' + error.message)
   }
-
   async function eliminarUsuario(id: string, nombre: string) {
     if (!window.confirm(`¿Eliminar a "${nombre}"?`)) return
     const { error } = await supabase.from('usuarios').delete().eq('id', id)
     if (!error) setUsuarios(prev => prev.filter(u => u.id !== id))
     else alert('Error: ' + error.message)
   }
-
   async function crearCategoria() {
-    if (!catNombre) return
-    setMsgCat('')
+    if (!catNombre) return; setMsgCat('')
     const { error } = await supabase.from('categorias').insert({ nombre: catNombre, color: catColor })
-    if (!error) {
-      setMsgCat(`✓ Categoría "${catNombre}" creada`)
-      setCatNombre(''); setCatColor('#E24B4A')
-      cargarCategorias()
-    } else setMsgCat('Error: ' + error.message)
+    if (!error) { setMsgCat(`✓ Categoría "${catNombre}" creada`); setCatNombre(''); setCatColor('#E24B4A'); cargarCategorias() }
+    else setMsgCat('Error: ' + error.message)
   }
-
   async function guardarCategoria() {
     if (!editandoCat) return
     const { error } = await supabase.from('categorias').update({ nombre: editandoCat.nombre, color: editandoCat.color }).eq('id', editandoCat.id)
-    if (!error) { setEditandoCat(null); cargarCategorias() }
-    else alert('Error: ' + error.message)
+    if (!error) { setEditandoCat(null); cargarCategorias() } else alert('Error: ' + error.message)
   }
-
   async function eliminarCategoria(id: string, nombre: string) {
     if (!window.confirm(`¿Eliminar categoría "${nombre}"?`)) return
     const { error } = await supabase.from('categorias').delete().eq('id', id)
@@ -92,19 +109,153 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
   useEffect(() => {
     if (vista === 'usuarios') cargarUsuarios()
     if (vista === 'categorias') cargarCategorias()
+    if (vista === 'reportes') { cargarReportes(); cargarTecnicos() }
   }, [vista])
 
-  const COLORES_RAPIDOS = [
-    {hex:'#E24B4A',label:'Rojo'},
-    {hex:'#EF9F27',label:'Naranja'},
-    {hex:'#F5CC1E',label:'Amarillo'},
-    {hex:'#3B6D11',label:'Verde'},
-    {hex:'#185FA5',label:'Azul'},
-    {hex:'#8B5CF6',label:'Violeta'},
-    {hex:'#888780',label:'Gris'},
-    {hex:'#0F6E56',label:'Teal'},
+  useEffect(() => { cargarReportes() }, [])
+
+  const COLORES = [
+    {hex:'#E24B4A'},{hex:'#EF9F27'},{hex:'#F5CC1E'},{hex:'#3B6D11'},
+    {hex:'#185FA5'},{hex:'#8B5CF6'},{hex:'#888780'},{hex:'#0F6E56'},
   ]
 
+  const estadoColor: any = {
+    pendiente:{bg:'#FAEEDA',c:'#633806',label:'Pendiente'},
+    en_curso:{bg:'#E6F1FB',c:'#0C447C',label:'En curso'},
+    realizada:{bg:'#EAF3DE',c:'#27500A',label:'Realizada'},
+    cerrada:{bg:'#F1EFE8',c:'#888780',label:'Cerrada'},
+  }
+
+  // ── Detalle reporte ──
+  if (vista === 'reportes' && reporteDetalle) return (
+    <div style={{minHeight:'100vh',background:'#F1EFE8',fontFamily:'sans-serif'}}>
+      <div style={{background:'#185FA5',padding:'14px 20px',display:'flex',alignItems:'center',gap:10}}>
+        <button onClick={()=>{setReporteDetalle(null);setMsgReporte('');setFechaEstimada('');setTecnicoAsignado('')}} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',padding:'6px 12px',borderRadius:6,cursor:'pointer',fontSize:12}}>← Volver</button>
+        <span style={{color:'#fff',fontSize:15,fontWeight:500,flex:1}}>Detalle del reporte</span>
+        <span style={{color:'rgba(255,255,255,0.5)',fontSize:11}}>{VERSION}</span>
+      </div>
+      <div style={{padding:20,display:'flex',flexDirection:'column',gap:12}}>
+        <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8,marginBottom:12}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:500}}>{reporteDetalle.titulo}</div>
+              <div style={{fontSize:11,color:'#888',marginTop:3}}>{new Date(reporteDetalle.created_at).toLocaleString('es-AR')}</div>
+            </div>
+            <span style={{background:estadoColor[reporteDetalle.estado]?.bg||'#F1EFE8',color:estadoColor[reporteDetalle.estado]?.c||'#888',fontSize:10,padding:'3px 10px',borderRadius:100,fontWeight:500,flexShrink:0}}>
+              {estadoColor[reporteDetalle.estado]?.label||reporteDetalle.estado}
+            </span>
+          </div>
+
+          {reporteDetalle.descripcion && (
+            <>
+              <div style={{fontSize:11,color:'#888',marginBottom:4}}>DESCRIPCIÓN</div>
+              <div style={{background:'#F1EFE8',borderRadius:8,padding:'10px 12px',fontSize:13,color:'#444',lineHeight:1.5,marginBottom:12}}>
+                {reporteDetalle.descripcion.split('\n\n[archivos:')[0]}
+              </div>
+            </>
+          )}
+
+          {reporteDetalle.descripcion?.includes('[archivos:') && (
+            <>
+              <div style={{fontSize:11,color:'#888',marginBottom:8}}>ARCHIVOS ADJUNTOS</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6,marginBottom:12}}>
+                {reporteDetalle.descripcion.split('[archivos:')[1]?.replace(']','').split(',').map((url: string, i: number) => (
+                  <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
+                    style={{aspectRatio:'1',borderRadius:8,overflow:'hidden',display:'block',background:'#F1EFE8',border:'0.5px solid #E8E6DE'}}>
+                    {url.trim().match(/\.(mp4|mov|avi|webm)/i) ? (
+                      <video src={url.trim()} style={{width:'100%',height:'100%',objectFit:'cover'}} muted/>
+                    ) : (
+                      <img src={url.trim()} style={{width:'100%',height:'100%',objectFit:'cover'}} alt={`adjunto ${i+1}`}/>
+                    )}
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
+
+          {reporteDetalle.estado === 'pendiente' && <>
+            <div style={{fontSize:11,color:'#888',marginBottom:4}}>ASIGNAR TÉCNICO</div>
+            <select value={tecnicoAsignado} onChange={e=>setTecnicoAsignado(e.target.value)}
+              style={{width:'100%',padding:10,borderRadius:8,border:'0.5px solid #ddd',fontSize:13,marginBottom:12,boxSizing:'border-box' as const,background:'#fff'}}>
+              <option value="">— Sin asignar —</option>
+              {tecnicos.map(t=>(<option key={t.id} value={t.id}>{t.nombre}</option>))}
+            </select>
+
+            <div style={{fontSize:11,color:'#888',marginBottom:4}}>FECHA ESTIMADA DE RESOLUCIÓN</div>
+            <input type="date" value={fechaEstimada} onChange={e=>setFechaEstimada(e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
+              style={{width:'100%',padding:10,borderRadius:8,border:'0.5px solid #ddd',fontSize:13,marginBottom:12,boxSizing:'border-box' as const}}/>
+          </>}
+
+          {reporteDetalle.estado === 'en_curso' && reporteDetalle.fecha_estimada && (
+            <div style={{background:'#E6F1FB',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#0C447C',marginBottom:12}}>
+              📅 Fecha estimada: {new Date(reporteDetalle.fecha_estimada).toLocaleDateString('es-AR')}
+            </div>
+          )}
+
+          {msgReporte && (
+            <div style={{background:msgReporte.startsWith('✓')?'#EAF3DE':'#FCEBEB',borderRadius:8,padding:'8px 12px',fontSize:12,color:msgReporte.startsWith('✓')?'#27500A':'#A32D2D',marginBottom:12}}>
+              {msgReporte}
+            </div>
+          )}
+        </div>
+
+        {reporteDetalle.estado === 'pendiente' && (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <button onClick={()=>rechazarReporte(reporteDetalle.id)} style={{padding:13,borderRadius:10,background:'#fff',border:'0.5px solid #F7C1C1',fontSize:13,fontWeight:500,cursor:'pointer',color:'#A32D2D'}}>
+              ✕ Rechazar
+            </button>
+            <button onClick={()=>aprobarReporte(reporteDetalle.id)} style={{padding:13,borderRadius:10,background:'#3B6D11',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>
+              ✓ Aprobar OT
+            </button>
+          </div>
+        )}
+        {reporteDetalle.estado !== 'pendiente' && (
+          <div style={{background:estadoColor[reporteDetalle.estado]?.bg,borderRadius:10,padding:12,textAlign:'center',fontSize:13,color:estadoColor[reporteDetalle.estado]?.c,fontWeight:500}}>
+            {estadoColor[reporteDetalle.estado]?.label} — no requiere acción
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  // ── Lista reportes ──
+  if (vista === 'reportes') return (
+    <div style={{minHeight:'100vh',background:'#F1EFE8',fontFamily:'sans-serif'}}>
+      <div style={{background:'#185FA5',padding:'14px 20px',display:'flex',alignItems:'center',gap:10}}>
+        <button onClick={()=>setVista('dashboard')} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',padding:'6px 12px',borderRadius:6,cursor:'pointer',fontSize:12}}>← Volver</button>
+        <span style={{color:'#fff',fontSize:16,fontWeight:500,flex:1}}>Reportes y OT</span>
+        <button onClick={cargarReportes} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',padding:'6px 10px',borderRadius:6,cursor:'pointer',fontSize:11}}>↻</button>
+      </div>
+      <div style={{padding:20,display:'flex',flexDirection:'column',gap:10}}>
+        {loadingReportes && <div style={{textAlign:'center',padding:20,color:'#888',fontSize:13}}>Cargando...</div>}
+        {!loadingReportes && reportes.length === 0 && (
+          <div style={{background:'#fff',borderRadius:10,padding:24,textAlign:'center',color:'#888',fontSize:13}}>No hay reportes aún</div>
+        )}
+        {reportes.map(r=>(
+          <div key={r.id} onClick={()=>{setReporteDetalle(r);setTecnicoAsignado('');setFechaEstimada('');setMsgReporte('')}}
+            style={{background:'#fff',borderRadius:10,padding:'12px 14px',
+              border:r.estado==='pendiente'?'0.5px solid #FAC775':'0.5px solid #E8E6DE',
+              borderLeft:r.estado==='pendiente'?'3px solid #EF9F27':'3px solid #E8E6DE',
+              cursor:'pointer'}}>
+            <div style={{display:'flex',alignItems:'flex-start',gap:8}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:500,whiteSpace:'nowrap' as const,overflow:'hidden',textOverflow:'ellipsis'}}>{r.titulo}</div>
+                <div style={{fontSize:10,color:'#888',marginTop:2}}>{new Date(r.created_at).toLocaleDateString('es-AR')}</div>
+                {r.fecha_estimada && <div style={{fontSize:10,color:'#185FA5',marginTop:2}}>📅 Est: {new Date(r.fecha_estimada).toLocaleDateString('es-AR')}</div>}
+                {r.descripcion?.includes('[archivos:') && <div style={{fontSize:10,color:'#185FA5',marginTop:2}}>📎 Con archivos</div>}
+              </div>
+              <span style={{background:estadoColor[r.estado]?.bg||'#F1EFE8',color:estadoColor[r.estado]?.c||'#888',fontSize:10,padding:'2px 8px',borderRadius:100,fontWeight:500,flexShrink:0}}>
+                {estadoColor[r.estado]?.label||r.estado}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  // ── Categorías ──
   if (vista === 'categorias') return (
     <div style={{minHeight:'100vh',background:'#F1EFE8',fontFamily:'sans-serif'}}>
       <div style={{background:'#185FA5',padding:'14px 20px',display:'flex',alignItems:'center',gap:10}}>
@@ -113,22 +264,17 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
         <span style={{color:'rgba(255,255,255,0.5)',fontSize:11}}>{VERSION}</span>
       </div>
       <div style={{padding:20,display:'flex',flexDirection:'column',gap:12}}>
-
         <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
           <div style={{fontSize:13,fontWeight:500,marginBottom:14}}>Nueva categoría</div>
           <div style={{fontSize:11,color:'#888',marginBottom:4}}>NOMBRE</div>
-          <input value={catNombre} onChange={e=>setCatNombre(e.target.value)} placeholder="Ej: Urgente, Preventivo, Correctivo..."
+          <input value={catNombre} onChange={e=>setCatNombre(e.target.value)} placeholder="Ej: Urgente, Preventivo..."
             style={{width:'100%',padding:10,borderRadius:8,border:'0.5px solid #ddd',fontSize:13,marginBottom:12,boxSizing:'border-box' as const}}/>
           <div style={{fontSize:11,color:'#888',marginBottom:8}}>COLOR</div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap' as const,marginBottom:12}}>
-            {COLORES_RAPIDOS.map(c=>(
-              <button key={c.hex} onClick={()=>setCatColor(c.hex)} title={c.label} style={{
-                width:32,height:32,borderRadius:'50%',background:c.hex,border:catColor===c.hex?'3px solid #333':'2px solid transparent',cursor:'pointer',flexShrink:0
-              }}/>
+            {COLORES.map(c=>(
+              <button key={c.hex} onClick={()=>setCatColor(c.hex)} style={{width:32,height:32,borderRadius:'50%',background:c.hex,border:catColor===c.hex?'3px solid #333':'2px solid transparent',cursor:'pointer'}}/>
             ))}
-            <input type="color" value={catColor} onChange={e=>setCatColor(e.target.value)}
-              title="Color personalizado"
-              style={{width:32,height:32,borderRadius:'50%',border:'0.5px solid #ddd',cursor:'pointer',padding:2}}/>
+            <input type="color" value={catColor} onChange={e=>setCatColor(e.target.value)} style={{width:32,height:32,borderRadius:'50%',border:'0.5px solid #ddd',cursor:'pointer',padding:2}}/>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
             <div style={{width:36,height:36,borderRadius:8,background:catColor,flexShrink:0}}></div>
@@ -136,46 +282,27 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
               <div style={{fontSize:13,fontWeight:500}}>{catNombre||'Vista previa'}</div>
               <div style={{fontSize:11,color:'#888'}}>{catColor}</div>
             </div>
-            <span style={{background:catColor,color:'#fff',fontSize:11,padding:'3px 10px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.3)'}}>
-              {catNombre||'Categoría'}
-            </span>
+            <span style={{background:catColor,color:'#fff',fontSize:11,padding:'3px 10px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.3)'}}>{catNombre||'Categoría'}</span>
           </div>
-          {msgCat && (
-            <div style={{background:msgCat.startsWith('✓')?'#EAF3DE':'#FCEBEB',borderRadius:8,padding:'8px 12px',fontSize:12,color:msgCat.startsWith('✓')?'#27500A':'#A32D2D',marginBottom:12}}>
-              {msgCat}
-            </div>
-          )}
-          <button onClick={crearCategoria} disabled={!catNombre} style={{
-            width:'100%',padding:12,borderRadius:8,background:catNombre?catColor:'#ccc',
-            color:'#fff',border:'none',fontSize:14,fontWeight:500,cursor:'pointer',
-            textShadow:'0 1px 2px rgba(0,0,0,0.2)'
-          }}>Crear categoría</button>
+          {msgCat && <div style={{background:msgCat.startsWith('✓')?'#EAF3DE':'#FCEBEB',borderRadius:8,padding:'8px 12px',fontSize:12,color:msgCat.startsWith('✓')?'#27500A':'#A32D2D',marginBottom:12}}>{msgCat}</div>}
+          <button onClick={crearCategoria} disabled={!catNombre} style={{width:'100%',padding:12,borderRadius:8,background:catNombre?catColor:'#ccc',color:'#fff',border:'none',fontSize:14,fontWeight:500,cursor:'pointer',textShadow:'0 1px 2px rgba(0,0,0,0.2)'}}>Crear categoría</button>
         </div>
-
         <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
             <div style={{fontSize:13,fontWeight:500}}>Categorías ({categorias.length})</div>
             <button onClick={cargarCategorias} style={{fontSize:11,color:'#185FA5',background:'transparent',border:'none',cursor:'pointer'}}>Actualizar</button>
           </div>
-          {categorias.length === 0 ? (
-            <div style={{fontSize:12,color:'#888',textAlign:'center',padding:'12px 0'}}>No hay categorías</div>
-          ) : categorias.map(c=>(
+          {categorias.map(c=>(
             <div key={c.id}>
               {editandoCat?.id === c.id ? (
                 <div style={{padding:'10px 0',borderBottom:'0.5px solid #F1EFE8'}}>
-                  <div style={{fontSize:11,color:'#888',marginBottom:4}}>NOMBRE</div>
                   <input value={editandoCat.nombre} onChange={e=>setEditandoCat({...editandoCat,nombre:e.target.value})}
                     style={{width:'100%',padding:8,borderRadius:7,border:'0.5px solid #ddd',fontSize:13,marginBottom:8,boxSizing:'border-box' as const}}/>
-                  <div style={{fontSize:11,color:'#888',marginBottom:8}}>COLOR</div>
                   <div style={{display:'flex',gap:6,flexWrap:'wrap' as const,marginBottom:8}}>
-                    {COLORES_RAPIDOS.map(col=>(
-                      <button key={col.hex} onClick={()=>setEditandoCat({...editandoCat,color:col.hex})} title={col.label} style={{
-                        width:28,height:28,borderRadius:'50%',background:col.hex,
-                        border:editandoCat.color===col.hex?'3px solid #333':'2px solid transparent',cursor:'pointer'
-                      }}/>
+                    {COLORES.map(col=>(
+                      <button key={col.hex} onClick={()=>setEditandoCat({...editandoCat,color:col.hex})} style={{width:28,height:28,borderRadius:'50%',background:col.hex,border:editandoCat.color===col.hex?'3px solid #333':'2px solid transparent',cursor:'pointer'}}/>
                     ))}
-                    <input type="color" value={editandoCat.color} onChange={e=>setEditandoCat({...editandoCat,color:e.target.value})}
-                      style={{width:28,height:28,borderRadius:'50%',border:'0.5px solid #ddd',cursor:'pointer',padding:1}}/>
+                    <input type="color" value={editandoCat.color} onChange={e=>setEditandoCat({...editandoCat,color:e.target.value})} style={{width:28,height:28,borderRadius:'50%',border:'0.5px solid #ddd',cursor:'pointer',padding:1}}/>
                   </div>
                   <div style={{display:'flex',gap:6}}>
                     <button onClick={guardarCategoria} style={{flex:1,padding:'8px',borderRadius:7,border:'none',background:'#185FA5',color:'#fff',fontSize:12,cursor:'pointer',fontWeight:500}}>✓ Guardar</button>
@@ -187,11 +314,9 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
                   <div style={{width:32,height:32,borderRadius:8,background:c.color,flexShrink:0}}></div>
                   <div style={{flex:1}}>
                     <div style={{fontSize:12,fontWeight:500}}>{c.nombre}</div>
-                    <div style={{fontSize:10,color:'#888',marginTop:1}}>{c.color}</div>
+                    <div style={{fontSize:10,color:'#888'}}>{c.color}</div>
                   </div>
-                  <span style={{background:c.color,color:'#fff',fontSize:10,padding:'2px 10px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.2)'}}>
-                    {c.nombre}
-                  </span>
+                  <span style={{background:c.color,color:'#fff',fontSize:10,padding:'2px 10px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.2)'}}>{c.nombre}</span>
                   <button onClick={()=>setEditandoCat({...c})} style={{padding:'4px 8px',borderRadius:6,border:'0.5px solid #ddd',background:'transparent',fontSize:11,cursor:'pointer',color:'#185FA5'}}>✏️</button>
                   <button onClick={()=>eliminarCategoria(c.id,c.nombre)} style={{padding:'4px 8px',borderRadius:6,border:'0.5px solid #F7C1C1',background:'transparent',fontSize:11,cursor:'pointer',color:'#A32D2D'}}>✕</button>
                 </div>
@@ -203,6 +328,7 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
     </div>
   )
 
+  // ── Usuarios ──
   if (vista === 'usuarios') return (
     <div style={{minHeight:'100vh',background:'#F1EFE8',fontFamily:'sans-serif'}}>
       <div style={{background:'#185FA5',padding:'14px 20px',display:'flex',alignItems:'center',gap:10}}>
@@ -246,15 +372,10 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
               ℹ️ El reportador solo necesita su nombre para ingresar.
             </div>
           )}
-          {msgUsuario && (
-            <div style={{background:msgUsuario.startsWith('✓')?'#EAF3DE':'#FCEBEB',borderRadius:8,padding:'8px 12px',fontSize:12,color:msgUsuario.startsWith('✓')?'#27500A':'#A32D2D',marginBottom:12}}>
-              {msgUsuario}
-            </div>
-          )}
-          <button onClick={crearUsuario} disabled={!nuevoNombre||creando} style={{
-            width:'100%',padding:12,borderRadius:8,background:nuevoNombre?'#185FA5':'#ccc',
-            color:'#fff',border:'none',fontSize:14,fontWeight:500,cursor:'pointer'
-          }}>{creando?'Creando...':'Crear usuario'}</button>
+          {msgUsuario && <div style={{background:msgUsuario.startsWith('✓')?'#EAF3DE':'#FCEBEB',borderRadius:8,padding:'8px 12px',fontSize:12,color:msgUsuario.startsWith('✓')?'#27500A':'#A32D2D',marginBottom:12}}>{msgUsuario}</div>}
+          <button onClick={crearUsuario} disabled={!nuevoNombre||creando} style={{width:'100%',padding:12,borderRadius:8,background:nuevoNombre?'#185FA5':'#ccc',color:'#fff',border:'none',fontSize:14,fontWeight:500,cursor:'pointer'}}>
+            {creando?'Creando...':'Crear usuario'}
+          </button>
         </div>
         <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
@@ -267,10 +388,8 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
             <div key={u.id}>
               {editando?.id === u.id ? (
                 <div style={{padding:'10px 0',borderBottom:'0.5px solid #F1EFE8'}}>
-                  <div style={{fontSize:11,color:'#888',marginBottom:4}}>NOMBRE</div>
                   <input value={editando.nombre} onChange={e=>setEditando({...editando,nombre:e.target.value})}
                     style={{width:'100%',padding:8,borderRadius:7,border:'0.5px solid #ddd',fontSize:13,marginBottom:8,boxSizing:'border-box' as const}}/>
-                  <div style={{fontSize:11,color:'#888',marginBottom:4}}>ROL</div>
                   <div style={{display:'flex',gap:5,marginBottom:8}}>
                     {(['tecnico','reportador','admin'] as const).map(r=>(
                       <button key={r} onClick={()=>setEditando({...editando,rol:r})} style={{
@@ -281,9 +400,8 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
                       }}>{r==='tecnico'?'🔧':r==='reportador'?'👤':'🛡️'} {r}</button>
                     ))}
                   </div>
-                  <div style={{fontSize:11,color:'#888',marginBottom:4}}>NUEVA CONTRASEÑA (opcional)</div>
                   <input value={editando.clave||''} onChange={e=>setEditando({...editando,clave:e.target.value})}
-                    placeholder="Dejar vacío para no cambiar" type="password"
+                    placeholder="Nueva contraseña (opcional)" type="password"
                     style={{width:'100%',padding:8,borderRadius:7,border:'0.5px solid #ddd',fontSize:13,marginBottom:10,boxSizing:'border-box' as const}}/>
                   <div style={{display:'flex',gap:6}}>
                     <button onClick={guardarEdicion} style={{flex:1,padding:'8px',borderRadius:7,border:'none',background:'#185FA5',color:'#fff',fontSize:12,cursor:'pointer',fontWeight:500}}>✓ Guardar</button>
@@ -310,6 +428,8 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
     </div>
   )
 
+  // ── Dashboard principal ──
+  const pendientes = reportes.filter(r => r.estado === 'pendiente').length
   return (
     <div style={{minHeight:'100vh',background:'#F1EFE8',fontFamily:'sans-serif'}}>
       <div style={{background:'#185FA5',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
@@ -321,44 +441,46 @@ function DashboardAdmin({ email, onSalir }: { email: string, onSalir: () => void
       </div>
       <div style={{padding:20,display:'flex',flexDirection:'column',gap:12}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}}>
-          {[['6','Pendientes','#FCEBEB','#A32D2D'],['3','Por cerrar','#E6F1FB','#185FA5'],['24','Total OT','#F1EFE8','#444']].map(([v,l,bg,c])=>(
-            <div key={l} style={{background:bg,borderRadius:10,padding:'14px 12px',textAlign:'center'}}>
-              <div style={{fontSize:24,fontWeight:500,color:c}}>{v}</div>
-              <div style={{fontSize:11,color:'#888',marginTop:4}}>{l}</div>
-            </div>
-          ))}
+          <div style={{background:'#FCEBEB',borderRadius:10,padding:'14px 12px',textAlign:'center',cursor:'pointer'}} onClick={()=>setVista('reportes')}>
+            <div style={{fontSize:24,fontWeight:500,color:'#A32D2D'}}>{pendientes||'0'}</div>
+            <div style={{fontSize:11,color:'#888',marginTop:4}}>Pendientes</div>
+          </div>
+          <div style={{background:'#E6F1FB',borderRadius:10,padding:'14px 12px',textAlign:'center'}}>
+            <div style={{fontSize:24,fontWeight:500,color:'#185FA5'}}>{reportes.filter(r=>r.estado==='en_curso').length||'0'}</div>
+            <div style={{fontSize:11,color:'#888',marginTop:4}}>En curso</div>
+          </div>
+          <div style={{background:'#F1EFE8',borderRadius:10,padding:'14px 12px',textAlign:'center'}}>
+            <div style={{fontSize:24,fontWeight:500,color:'#444'}}>{reportes.length||'0'}</div>
+            <div style={{fontSize:11,color:'#888',marginTop:4}}>Total OT</div>
+          </div>
         </div>
-        <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
-          <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Pendientes de aprobación</div>
-          {[
-            {id:'REP-041',titulo:'Pérdida de aceite compresor',de:'Reportador',urgente:false},
-            {id:'REP-040',titulo:'Portón sector B no cierra',de:'Reportador',urgente:true},
-            {id:'OT-254',titulo:'Compresor aux. — cerrada por técnico',de:'Técnico',urgente:false},
-          ].map(ot=>(
-            <div key={ot.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'0.5px solid #F1EFE8'}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,fontWeight:500}}>{ot.titulo}</div>
-                <div style={{fontSize:10,color:'#888',marginTop:2}}>{ot.id} · {ot.de}</div>
-              </div>
-              {ot.urgente && <span style={{background:'#FCEBEB',color:'#A32D2D',fontSize:10,padding:'2px 8px',borderRadius:100,fontWeight:500}}>Urgente</span>}
-              <div style={{display:'flex',gap:5}}>
-                <button style={{padding:'5px 10px',borderRadius:6,border:'0.5px solid #ddd',background:'transparent',fontSize:11,cursor:'pointer'}}>✕</button>
-                <button style={{padding:'5px 10px',borderRadius:6,border:'none',background:'#3B6D11',color:'#fff',fontSize:11,cursor:'pointer'}}>✓</button>
-              </div>
+
+        {pendientes > 0 && (
+          <div style={{background:'#FAEEDA',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10,cursor:'pointer',border:'0.5px solid #FAC775'}}
+            onClick={()=>setVista('reportes')}>
+            <span style={{fontSize:20}}>⚠️</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,fontWeight:500,color:'#633806'}}>{pendientes} reporte{pendientes>1?'s':''} esperando aprobación</div>
+              <div style={{fontSize:11,color:'#854F0B'}}>Tocá para revisar</div>
             </div>
-          ))}
-        </div>
+            <span style={{color:'#854F0B',fontSize:16}}>→</span>
+          </div>
+        )}
+
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <button onClick={()=>setVista('reportes')} style={{padding:13,borderRadius:10,background:'#fff',border:'0.5px solid #E8E6DE',fontSize:13,fontWeight:500,cursor:'pointer',color:'#185FA5'}}>
+            📋 Ver reportes
+          </button>
           <button onClick={()=>setVista('usuarios')} style={{padding:13,borderRadius:10,background:'#fff',border:'0.5px solid #E8E6DE',fontSize:13,fontWeight:500,cursor:'pointer',color:'#185FA5'}}>
             👥 Usuarios
           </button>
           <button onClick={()=>setVista('categorias')} style={{padding:13,borderRadius:10,background:'#fff',border:'0.5px solid #E8E6DE',fontSize:13,fontWeight:500,cursor:'pointer',color:'#185FA5'}}>
             🏷️ Categorías
           </button>
+          <button style={{padding:13,borderRadius:10,background:'#185FA5',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>
+            + Nueva OT
+          </button>
         </div>
-        <button style={{width:'100%',padding:13,borderRadius:10,background:'#185FA5',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>
-          + Nueva OT
-        </button>
       </div>
     </div>
   )
@@ -427,9 +549,7 @@ function DashboardReportador({ nombre, onSalir }: { nombre: string, onSalir: () 
 
   function agregarArchivos(files: FileList | null) {
     if (!files) return
-    const nuevos = Array.from(files).filter(f =>
-      f.type.startsWith('image/') || f.type.startsWith('video/')
-    ).slice(0, 5 - archivos.length)
+    const nuevos = Array.from(files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/')).slice(0, 5 - archivos.length)
     const nuevosArchivos = [...archivos, ...nuevos].slice(0, 5)
     setArchivos(nuevosArchivos)
     setPreviews(nuevosArchivos.map(f => URL.createObjectURL(f)))
@@ -446,11 +566,10 @@ function DashboardReportador({ nombre, onSalir }: { nombre: string, onSalir: () 
     setEnviando(true)
     const urlsSubidas: string[] = []
     for (let i = 0; i < archivos.length; i++) {
-      const file = archivos[i]
       setProgreso(`Subiendo archivo ${i+1} de ${archivos.length}...`)
-      const ext = file.name.split('.').pop()
+      const ext = archivos[i].name.split('.').pop()
       const path = `reportes/${Date.now()}-${i}.${ext}`
-      const { error } = await supabase.storage.from('fotos-ot').upload(path, file)
+      const { error } = await supabase.storage.from('fotos-ot').upload(path, archivos[i])
       if (!error) {
         const { data } = supabase.storage.from('fotos-ot').getPublicUrl(path)
         urlsSubidas.push(data.publicUrl)
@@ -461,7 +580,8 @@ function DashboardReportador({ nombre, onSalir }: { nombre: string, onSalir: () 
       titulo,
       descripcion: desc + (urlsSubidas.length ? `\n\n[archivos:${urlsSubidas.join(',')}]` : ''),
       estado: 'pendiente',
-      prioridad: categoriaId || 'media',
+      prioridad: 'media',
+      categoria_id: categoriaId || null,
     })
     setProgreso(''); setEnviando(false); setEnviado(true)
   }
@@ -488,50 +608,40 @@ function DashboardReportador({ nombre, onSalir }: { nombre: string, onSalir: () 
             <div style={{fontSize:14,fontWeight:500,color:'#27500A'}}>Problema reportado</div>
             {catSeleccionada && (
               <div style={{margin:'8px auto 0',display:'inline-block'}}>
-                <span style={{background:catSeleccionada.color,color:'#fff',fontSize:12,padding:'3px 12px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.2)'}}>
-                  {catSeleccionada.nombre}
-                </span>
+                <span style={{background:catSeleccionada.color,color:'#fff',fontSize:12,padding:'3px 12px',borderRadius:100,fontWeight:500,textShadow:'0 1px 2px rgba(0,0,0,0.2)'}}>{catSeleccionada.nombre}</span>
               </div>
             )}
             <div style={{fontSize:12,color:'#3B6D11',marginTop:8,marginBottom:16}}>
               El administrador lo revisará pronto.
               {archivos.length > 0 && ` ${archivos.length} archivo${archivos.length>1?'s':''} adjunto${archivos.length>1?'s':''}.`}
             </div>
-            <button onClick={reset} style={{padding:'8px 20px',borderRadius:8,border:'0.5px solid #C0DD97',background:'transparent',cursor:'pointer',fontSize:12,color:'#27500A'}}>
-              Reportar otro
-            </button>
+            <button onClick={reset} style={{padding:'8px 20px',borderRadius:8,border:'0.5px solid #C0DD97',background:'transparent',cursor:'pointer',fontSize:12,color:'#27500A'}}>Reportar otro</button>
           </div>
         ) : (
           <div style={{background:'#fff',borderRadius:10,padding:16,border:'0.5px solid #E8E6DE'}}>
             <div style={{fontSize:13,fontWeight:500,marginBottom:16}}>Reportar un problema</div>
-
             <div style={{fontSize:11,color:'#888',marginBottom:4}}>TÍTULO *</div>
             <input value={titulo} onChange={e=>setTitulo(e.target.value)} placeholder="Ej: Pérdida de aceite compresor #3"
               style={{width:'100%',padding:10,borderRadius:8,border:'0.5px solid #ddd',fontSize:13,marginBottom:12,boxSizing:'border-box' as const}}/>
-
             <div style={{fontSize:11,color:'#888',marginBottom:4}}>DESCRIPCIÓN</div>
             <textarea value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Describí el problema con detalle..."
               style={{width:'100%',padding:10,borderRadius:8,border:'0.5px solid #ddd',fontSize:13,marginBottom:12,minHeight:72,resize:'none' as const,boxSizing:'border-box' as const,fontFamily:'sans-serif'}}/>
-
-            {categorias.length > 0 && (
-              <>
-                <div style={{fontSize:11,color:'#888',marginBottom:8}}>CATEGORÍA</div>
-                <div style={{display:'flex',gap:7,flexWrap:'wrap' as const,marginBottom:12}}>
-                  {categorias.map(c=>(
-                    <button key={c.id} onClick={()=>setCategoriaId(categoriaId===c.id?'':c.id)} style={{
-                      padding:'7px 14px',borderRadius:100,border:'2px solid',
-                      borderColor:categoriaId===c.id?c.color:'transparent',
-                      background:categoriaId===c.id?c.color:'#F1EFE8',
-                      color:categoriaId===c.id?'#fff':'#555',
-                      fontSize:12,fontWeight:500,cursor:'pointer',
-                      textShadow:categoriaId===c.id?'0 1px 2px rgba(0,0,0,0.2)':'none',
-                      transition:'all 0.15s'
-                    }}>{c.nombre}</button>
-                  ))}
-                </div>
-              </>
-            )}
-
+            {categorias.length > 0 && <>
+              <div style={{fontSize:11,color:'#888',marginBottom:8}}>CATEGORÍA</div>
+              <div style={{display:'flex',gap:7,flexWrap:'wrap' as const,marginBottom:12}}>
+                {categorias.map(c=>(
+                  <button key={c.id} onClick={()=>setCategoriaId(categoriaId===c.id?'':c.id)} style={{
+                    padding:'7px 14px',borderRadius:100,border:'2px solid',
+                    borderColor:categoriaId===c.id?c.color:'transparent',
+                    background:categoriaId===c.id?c.color:'#F1EFE8',
+                    color:categoriaId===c.id?'#fff':'#555',
+                    fontSize:12,fontWeight:500,cursor:'pointer',
+                    textShadow:categoriaId===c.id?'0 1px 2px rgba(0,0,0,0.2)':'none',
+                    transition:'all 0.15s'
+                  }}>{c.nombre}</button>
+                ))}
+              </div>
+            </>}
             <div style={{fontSize:11,color:'#888',marginBottom:8}}>FOTOS / VIDEOS (máx. 5)</div>
             {previews.length > 0 && (
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6,marginBottom:10}}>
@@ -563,15 +673,10 @@ function DashboardReportador({ nombre, onSalir }: { nombre: string, onSalir: () 
                 </button>
               </div>
             )}
-            <input ref={inputRef} type="file" accept="image/*,video/*" multiple style={{display:'none'}}
-              onChange={e=>agregarArchivos(e.target.files)}/>
-
+            <input ref={inputRef} type="file" accept="image/*,video/*" multiple style={{display:'none'}} onChange={e=>agregarArchivos(e.target.files)}/>
             {progreso && (
-              <div style={{background:'#E6F1FB',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#0C447C',marginBottom:10}}>
-                ⏳ {progreso}
-              </div>
+              <div style={{background:'#E6F1FB',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#0C447C',marginBottom:10}}>⏳ {progreso}</div>
             )}
-
             <button onClick={enviarReporte} disabled={!titulo||enviando} style={{
               width:'100%',padding:12,borderRadius:8,
               background:!titulo||enviando?'#ccc':catSeleccionada?catSeleccionada.color:'#1D9E75',
@@ -661,9 +766,7 @@ export default function App() {
             style={{width:'100%',padding:12,borderRadius:8,border:'0.5px solid #ddd',fontSize:14,marginBottom:16,boxSizing:'border-box' as const}}/>
         </>}
         {(rol === 'tecnico' || rol === 'reportador') && <>
-          <div style={{fontSize:11,color:'#888',marginBottom:4}}>
-            {rol === 'tecnico' ? 'SELECCIONÁ TU USUARIO' : 'SELECCIONÁ TU NOMBRE'}
-          </div>
+          <div style={{fontSize:11,color:'#888',marginBottom:4}}>{rol === 'tecnico' ? 'SELECCIONÁ TU USUARIO' : 'SELECCIONÁ TU NOMBRE'}</div>
           <select value={usuarioSeleccionado} onChange={e=>setUsuarioSeleccionado(e.target.value)}
             style={{width:'100%',padding:12,borderRadius:8,border:'0.5px solid #ddd',fontSize:14,marginBottom:rol==='tecnico'?10:16,boxSizing:'border-box' as const,background:'#fff',color:usuarioSeleccionado?'#333':'#888'}}>
             <option value="">— Seleccioná —</option>
